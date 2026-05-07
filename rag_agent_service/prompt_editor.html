@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Prompt Editor</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-base:#0f1117;--bg-surface:#181a24;--bg-card:#1e2130;--bg-hover:#262a3d;
+  --bg-input:#12141e;--border:#2a2e42;--border-focus:#0ea5e9;
+  --text-primary:#e8eaf0;--text-secondary:#9ca3b8;--text-muted:#5d6380;
+  --accent:#0ea5e9;--accent-hover:#38bdf8;--accent-glow:rgba(14,165,233,.15);
+  --danger:#f87171;--warning:#fbbf24;--shadow:0 4px 24px rgba(0,0,0,.35);
+  --radius:10px;--radius-sm:6px;
+}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-base);color:var(--text-primary);min-height:100vh;line-height:1.6}
+.app-header{background:linear-gradient(135deg,#181a24 0%,#1a1d30 100%);border-bottom:1px solid var(--border);padding:1.2rem 2rem;position:sticky;top:0;z-index:100}
+.app-header h1{font-size:1.35rem;font-weight:700;letter-spacing:-.02em}
+.subhead{font-size:.83rem;color:var(--text-muted);margin-top:.25rem}
+.container{padding:1.6rem 2rem 2rem;max-width:1100px}
+.notice{margin-bottom:1rem;padding:.95rem 1rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-secondary)}
+.editor-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.8rem}
+.editor-meta{font-size:.78rem;color:var(--text-muted);display:flex;gap:1rem;flex-wrap:wrap}
+textarea{width:100%;min-height:560px;max-height:75vh;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.1rem;font-family:'JetBrains Mono',monospace;font-size:.88rem;line-height:1.7;resize:vertical}
+textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+textarea.modified{border-color:var(--warning)}
+.actions{display:flex;align-items:center;gap:.7rem;margin-top:1rem;flex-wrap:wrap}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:.45rem;padding:.55rem 1.05rem;border-radius:var(--radius-sm);font:inherit;font-size:.85rem;font-weight:600;cursor:pointer;border:1px solid transparent;transition:.2s ease}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-outline{background:transparent;color:var(--text-secondary);border-color:var(--border)}
+.btn-outline:hover{color:var(--text-primary);border-color:var(--text-secondary);background:var(--bg-hover)}
+.btn-danger{background:rgba(248,113,113,.1);color:var(--danger);border-color:rgba(248,113,113,.25)}
+.loading{text-align:center;padding:4rem 2rem;color:var(--text-muted)}
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;padding:.8rem 1.3rem;border-radius:var(--radius-sm);font-size:.85rem;font-weight:500;color:#fff;z-index:999;opacity:0;transform:translateY(12px);transition:all .35s ease;pointer-events:none;max-width:380px;box-shadow:var(--shadow)}
+.toast.show{opacity:1;transform:translateY(0);pointer-events:auto}
+.toast.success{background:#059669}
+.toast.error{background:#dc2626}
+.toast.info{background:#2563eb}
+@media(max-width:768px){.container,.app-header{padding-left:1rem;padding-right:1rem}.editor-header{flex-direction:column;align-items:flex-start}}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <h1>RAG Prompt Editor</h1>
+  <div class="subhead">Edit the live answer-system prompt used by <code>rag_agent_service</code>. Changes are read from disk on the next answer request.</div>
+</header>
+
+<div class="container" id="editor-area">
+  <div class="loading">Loading prompt...</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = window.location.origin;
+let currentPrompt = '';
+let originalPrompt = '';
+let defaultPrompt = '';
+let promptMeta = {};
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function loadPrompt() {
+  const area = document.getElementById('editor-area');
+  area.innerHTML = '<div class="loading">Loading prompt...</div>';
+  try {
+    const data = await api('GET', '/api/prompt');
+    promptMeta = data.prompt || {};
+    currentPrompt = promptMeta.content || '';
+    originalPrompt = currentPrompt;
+    defaultPrompt = data.default_content || '';
+    renderEditor();
+  } catch (err) {
+    area.innerHTML = `<div class="loading" style="color:var(--danger)">Failed to load: ${err.message}</div>`;
+  }
+}
+
+function renderEditor() {
+  const lineCount = currentPrompt.split('\n').length;
+  const charCount = currentPrompt.length;
+  document.getElementById('editor-area').innerHTML = `
+    <div class="notice">
+      This editor controls the single live answer-system prompt used by <code>rag_agent_service</code>.
+      Retrieval planner prompts and other internal helper prompts are unchanged in this first pass.
+    </div>
+    <div class="editor-header">
+      <h2>${escapeHtml(promptMeta.label || 'RAG System Prompt')}</h2>
+      <div class="editor-meta">
+        <span>📄 ${escapeHtml(promptMeta.filename || 'rag_system_prompt.md')}</span>
+        <span>📏 <span id="line-count">${lineCount}</span> lines</span>
+        <span>🔤 <span id="char-count">${charCount}</span> chars</span>
+      </div>
+    </div>
+    <textarea id="prompt-textarea" spellcheck="false">${escapeHtml(currentPrompt)}</textarea>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="savePrompt()">💾 Save</button>
+      <button class="btn btn-outline" onclick="reloadPrompt()">↻ Reload</button>
+      <button class="btn btn-outline" onclick="resetChanges()">↩ Reset Changes</button>
+      <div class="spacer"></div>
+      <button class="btn btn-danger" onclick="resetToDefault()">Restore Default</button>
+    </div>
+  `;
+
+  const ta = document.getElementById('prompt-textarea');
+  ta.addEventListener('input', () => {
+    currentPrompt = ta.value;
+    document.getElementById('char-count').textContent = currentPrompt.length;
+    document.getElementById('line-count').textContent = currentPrompt.split('\n').length;
+    ta.classList.toggle('modified', currentPrompt !== originalPrompt);
+  });
+}
+
+async function savePrompt() {
+  try {
+    await api('PUT', '/api/prompt', { content: currentPrompt });
+    originalPrompt = currentPrompt;
+    document.getElementById('prompt-textarea')?.classList.remove('modified');
+    showToast('RAG prompt saved', 'success');
+  } catch (err) {
+    showToast(`Save failed: ${err.message}`, 'error');
+  }
+}
+
+async function reloadPrompt() {
+  await loadPrompt();
+  showToast('Prompt reloaded from disk', 'info');
+}
+
+function resetChanges() {
+  currentPrompt = originalPrompt;
+  renderEditor();
+  showToast('Reverted unsaved changes', 'info');
+}
+
+async function resetToDefault() {
+  if (!confirm('Restore the RAG prompt to the default template?')) return;
+  try {
+    const data = await api('POST', '/api/prompt/reset');
+    currentPrompt = data.prompt?.content || defaultPrompt;
+    originalPrompt = currentPrompt;
+    renderEditor();
+    showToast('RAG prompt restored to default', 'success');
+  } catch (err) {
+    showToast(`Reset failed: ${err.message}`, 'error');
+  }
+}
+
+let toastTimer;
+function showToast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast ${type} show`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.appendChild(document.createTextNode(s));
+  return d.innerHTML;
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    savePrompt();
+  }
+});
+
+loadPrompt();
+</script>
+</body>
+</html>
