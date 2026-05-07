@@ -522,6 +522,28 @@ async def get_uploaded_file_context_new(
 
 
 
+
+
+
+
+# {
+#   "user_id": "user123",
+#   "chat_id": "chat456",
+#   "attachement_id": ["file_id_abcd", "file_id_bdfg"]
+# }
+
+
+# request body example for /get_full_files_for_each_ids:
+# {
+#   "files": {
+#     "file_id_abcd": {
+#       "file_name": "abcd.pdf",
+#       "content": "full extracted markdown text..."
+#     }
+#   },
+#   "missing_file_ids": []
+# }
+
 @router.post("/get_full_files_for_each_ids")
 async def get_full_files_for_each_ids(request: FullFilesRequest):
     file_ids = request.file_ids()
@@ -578,6 +600,35 @@ async def get_full_files_for_each_ids(request: FullFilesRequest):
 
 @router.post("/get_message_content")
 async def get_message_content(request: MessageContentRequest):
+
+#  request body example:
+#     {
+#   "user_id": "user123",
+#   "chat_id": "chat456",
+#   "message_id": "msg789"
+# }
+
+
+
+# {
+#   "content": "message text",
+#   "metadata": [
+#     {
+#       "created_at": "...",
+#       "message_id": "...",
+#       "user_id": "...",
+#       "has_attachments": true,
+#       "chat_id": "...",
+#       "role": "user",
+#       "seq": 1,
+#       "attachment_ids": [],
+#       "_point_id": "..."
+#     }
+#   ],
+#   "chunk_count": 1
+# }
+
+
     logger.info(
         "get_message_content request user_id=%s chat_id=%s message_id=%s",
         request.user_id,
